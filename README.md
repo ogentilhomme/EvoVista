@@ -1,6 +1,14 @@
-# 3DRecon
+# EvoVista
 
-Pipeline for 3D reconstruction from video or images: sample frames, resize, blur analysis, then [COLMAP](https://colmap.github.io/) for feature extraction, matching, sparse and dense reconstruction.
+**See the evolution of your space.** EvoVista is a platform for 3D reconstruction of places using images across time. Move around the environment and add filters or overlays showing how that place looked before—especially designed for renovated spaces. A tool for house owners to visualize and share the evolution of their home.
+
+## Vision
+
+Capture a space at different moments in time, build 3D models from your photos, then explore and compare: stroll through the current layout while toggling overlays of how it looked in the past. Perfect for documenting renovations, before/after journeys, or simply preserving the memory of your home as it changes.
+
+## Pipeline
+
+The core pipeline performs 3D reconstruction from video or images: sample frames, resize, blur analysis, then [COLMAP](https://colmap.github.io/) for feature extraction, matching, sparse and dense reconstruction.
 
 ## Requirements
 

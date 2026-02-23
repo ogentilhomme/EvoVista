@@ -221,7 +221,7 @@ def main():
 
     root = tk.Tk()
     _set_app_icon(root)
-    root.title("3DRecon pipeline")
+    root.title("EvoVista pipeline")
     root.geometry("680x520")
     root.minsize(520, 420)
 

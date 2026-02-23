@@ -1,4 +1,4 @@
-Dock and window icon for the 3DRecon GUI
+Dock and window icon for the EvoVista GUI
 
 1. Add a PNG image named:  icon.png
    Recommended size: 256×256 or 512×512 pixels.
