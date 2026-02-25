@@ -271,8 +271,11 @@ run_colmap() {
     colmap "$@"
 }
 export -f run_colmap
+# run_colmap depends on these logging helpers when called from child shells.
+export -f run_and_log
+export -f filter_colmap_logs
 # Export runtime config so child bash scripts (src/*.sh) can call run_colmap safely.
-export SCRIPT_DIR COLMAP_BACKEND COLMAP_IMAGE COLMAP_GPU_FLAGS
+export SCRIPT_DIR COLMAP_BACKEND COLMAP_IMAGE COLMAP_GPU_FLAGS PRETTY_LOG RAW_LOG_FILE
 
 if [[ -f "$SCRIPT_DIR/venv/bin/activate" ]]; then
   source "$SCRIPT_DIR/venv/bin/activate"
