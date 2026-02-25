@@ -22,8 +22,8 @@ SKIP_BLUR_IF_PLOT=""
 # - PRETTY_LOG=1: compact progress in terminal + full raw log on disk
 # - PRETTY_LOG=0: print full command output directly
 PRETTY_LOG="${PRETTY_LOG:-1}" # 1: filter verbose COLMAP logs in terminal, keep raw log on disk
-# Auto-open COLMAP+fused viewer at the end of a successful run (GUI sessions only).
-AUTO_OPEN_RESULTS="${AUTO_OPEN_RESULTS:-1}" # 1: open COLMAP+fused at end (GUI session only)
+# Auto-open result viewers at the end of a successful run (GUI sessions only).
+AUTO_OPEN_RESULTS="${AUTO_OPEN_RESULTS:-1}" # 1: open COLMAP + fused + mesh(if present) at end
 
 # Parse project (first non-option arg)
 PROJECT_ARG=""

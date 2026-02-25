@@ -1,22 +1,38 @@
-# 3DRecon
+# EvoVista
 
-Pipeline for 3D reconstruction from video or images: sample frames, resize, blur analysis, then [COLMAP](https://colmap.github.io/) for feature extraction, matching, sparse and dense reconstruction.
+End-to-end 3D reconstruction pipeline from video or photos:
+
+1. optional video frame sampling
+2. image resize
+3. blur analysis
+4. COLMAP feature extraction and matching
+5. sparse reconstruction
+6. dense reconstruction (`fused.ply`)
+7. optional mesh generation with MeshLab server (`house_mesh.ply`)
 
 ## Requirements
 
-- **Python 3.9+** (for resize, blur analysis, GUI)
-- **COLMAP** (feature extraction, matching, sparse/dense reconstruction)
-- **ffmpeg** (only if you start from video — to sample frames at 5 fps)
+- Python 3.9+ (scripts and GUI)
+- COLMAP (local binary and/or Docker image)
+- Docker (optional fallback backend)
+- ffmpeg (only if starting from video)
+- MeshLab (`meshlab` / `meshlabserver`) optional for mesh generation and visual checks
 
 ## Installation
 
-### 1. COLMAP
+### Python dependencies
 
-Install COLMAP so the `colmap` command is available:
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
 
-- **Official install guide:** [https://colmap.github.io/install](https://colmap.github.io/install)
-- **macOS (Homebrew):** `brew install colmap`
-- **Pre-built binaries:** [GitHub Releases](https://github.com/colmap/colmap/releases)
+### COLMAP
+
+- Official: <https://colmap.github.io/install>
+- macOS (Homebrew): `brew install colmap`
+- Linux: install the package/binary so `colmap` is in `PATH`
 
 Check:
 
@@ -24,138 +40,206 @@ Check:
 colmap -h
 ```
 
-### 2. Python virtual environment and dependencies
+### Docker (optional but recommended)
 
-From the project root:
+Docker is used when local CUDA-enabled COLMAP is not detected.
 
-```bash
-# Create venv
-python3 -m venv venv
-
-# Activate (macOS/Linux)
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-Optional (macOS, for GUI dock icon):
+Check:
 
 ```bash
-pip install pyobjc-framework-Cocoa
+docker info
 ```
 
-### 3. (Optional) ffmpeg
+### ffmpeg (video input only)
 
-Only needed if you run from **video** (e.g. `.mov` / `.mp4`):
+- macOS: `brew install ffmpeg`
+- Linux: `sudo apt install ffmpeg`
 
-- **macOS:** `brew install ffmpeg`
-- **Linux:** `sudo apt install ffmpeg` (or your package manager)
+### MeshLab (optional)
 
-## Project layout
+- Linux: `sudo apt install meshlab`
 
-Put each reconstruction project in a folder under `data/`:
+Check:
 
+```bash
+which meshlab
+which meshlabserver
 ```
+
+## Data layout
+
+Each project goes under `data/<project>/`.
+
+```text
 data/
   MyProject/
-    IMG_1234.mov          # optional: video to sample
-    images/               # frames (from video or your own .jpg/.JPG)
-    images_resized/       # created by pipeline
-    images_resized_filtered/
-    database.db
+    *.mov | *.mp4                 # optional if starting from video
+    images/                       # your photos or sampled frames
+    images_resized/               # generated
+    images_resized_filtered/      # optional, generated with blur threshold
+    database.db                   # COLMAP database
     sparse/
     dense/
+    logs/
 ```
 
-- **From video:** put a `.mov` or `.mp4` in the project folder; the pipeline will sample at 5 fps into `images/`.
-- **From images:** put your photos in `data/MyProject/images/` (`.jpg` or `.JPG`) and start from step `images`.
+## Running the pipeline
 
-## Usage
-
-### Command line
+### Common commands
 
 ```bash
 # Full pipeline from video
 ./run.sh MyProject
 
-# Start from existing images (no video)
+# Start from photos already present in data/MyProject/images
 ./run.sh MyProject --from-step images
 
-# Start from resized images, use blur threshold and filtered set
+# Start from resized images
+./run.sh MyProject --from-step images_resized
+
+# Use filtered images from blur threshold
 ./run.sh MyProject --from-step images_resized --blur-threshold 50 --use-image-set filtered
 
-# Options
-./run.sh <project> [--from-step STEP] [--blur-threshold N] [--use-image-set whole|filtered] [--skip-blur-if-plot] [--matcher sequential|exhaustive]
+# Faster matching for video-like sequences
+./run.sh MyProject --from-step images --matcher sequential
 ```
 
-Steps: `video` | `images` | `images_resized` | `feature_extraction` | `feature_matching` | `sparse_reconstruction` | `dense_reconstruction`
+Available steps:
+`video`, `images`, `images_resized`, `feature_extraction`, `feature_matching`, `sparse_reconstruction`, `dense_reconstruction`.
 
-### GUI
+### Backend selection (local vs docker)
+
+`run.sh` supports:
+
+- `COLMAP_BACKEND=auto` (default)
+- `COLMAP_BACKEND=local`
+- `COLMAP_BACKEND=docker`
+
+`auto` behavior:
+
+1. use local only if `colmap version` explicitly reports CUDA support
+2. otherwise fallback to Docker
+3. otherwise fail with a clear message
+
+Examples:
+
+```bash
+# Force local COLMAP
+COLMAP_BACKEND=local ./run.sh MyProject --from-step images
+
+# Force Docker COLMAP
+COLMAP_BACKEND=docker ./run.sh MyProject --from-step images
+```
+
+## Failure modes and what to do
+
+### Docker unavailable + local CUDA COLMAP unavailable
+
+Error:
+
+```text
+Error: local COLMAP with CUDA not detected and Docker is unavailable.
+```
+
+Fix:
+
+- start/install Docker, or
+- install a CUDA-enabled local COLMAP, or
+- force another backend explicitly with `COLMAP_BACKEND=...`
+
+### `colmap gui` / `meshlabserver` symbol lookup error from Snap terminals
+
+This often happens in Snap-based environments (example: VS Code Snap) due to mixed runtime libraries.
+
+Use clean environment wrappers:
+
+- GUI open helper: `./scripts/open_results_clean.sh <project> <scene>`
+- Mesh generation command with clean env:
+
+```bash
+env -i PATH=/usr/bin:/bin HOME="$HOME" USER="$USER" DISPLAY="$DISPLAY" XAUTHORITY="$XAUTHORITY" \
+  /usr/bin/meshlabserver -i dense/0/fused.ply -o dense/0/house_mesh.ply -s /absolute/path/to/resources/poisson.mlx
+```
+
+### `meshlabserver` missing
+
+Dense reconstruction still succeeds. `fused.ply` remains the primary output.
+
+Mesh generation is optional and non-blocking in the pipeline.
+
+## MeshLab server in this project
+
+### What `meshlabserver` is used for
+
+After COLMAP dense reconstruction, the pipeline can convert `fused.ply` (dense point cloud) into `house_mesh.ply` (surface mesh) using Poisson reconstruction.
+
+### Why this step is optional
+
+- `fused.ply` is already usable for many workflows
+- Poisson meshing is a post-process convenience step
+- if it fails, pipeline should not lose dense reconstruction results
+
+### Poisson script and parameters
+
+Script path:
+
+- `resources/poisson.mlx`
+
+The script uses `Surface Reconstruction: Screened Poisson` with explicit parameters required by this MeshLab plugin build:
+
+- `depth=8`: octree max depth. Higher = more detail + more RAM/time.
+- `fullDepth=5`: complete octree depth before adaptive refinement.
+- `cgDepth=0`: depth until conjugate-gradient solver is used.
+- `scale=1.1`: reconstruction cube scale vs data bounding box.
+- `samplesPerNode=1.5`: sampling density target per octree node.
+- `pointWeight=4`: interpolation weight (0 is unscreened Poisson).
+- `iters=8`: Gauss-Seidel relaxations.
+- `confidence=false`: do not use vertex quality as normal confidence weight.
+- `preClean=true`: removes invalid/unreferenced points before solve.
+- `visibleLayer=false`: use only current layer (not all visible layers).
+
+These defaults are stable and conservative for typical phone/video captures.
+
+## Visualizing results
+
+Use the helper:
+
+```bash
+./scripts/open_results_clean.sh <project> <scene_id>
+```
+
+It opens:
+
+1. COLMAP GUI with sparse import
+2. MeshLab on `fused.ply`
+3. MeshLab on `house_mesh.ply` automatically if present (`OPEN_MESH=auto`)
+
+`OPEN_MESH` modes:
+
+- `OPEN_MESH=auto` (default): open mesh if it exists
+- `OPEN_MESH=1`: try to open mesh and warn if missing
+- `OPEN_MESH=0`: never open mesh
+
+## Resume strategy after failure
+
+- If failure happened after dense fusion and `dense/<scene>/fused.ply` exists, do not rerun dense.
+- Run only meshing with `meshlabserver` on existing `fused.ply`.
+- If you rerun `--from-step dense_reconstruction`, COLMAP dense steps are recomputed.
+
+## GUI
 
 ```bash
 source venv/bin/activate
 python run_gui.py
 ```
 
-- Choose project, start step, blur threshold, matcher (sequential/exhaustive), image set (whole/filtered).
-- **Run pipeline** opens a new terminal and runs the pipeline there (raw output for debugging).
-- Overwrite/archive dialog only considers artifacts that would be overwritten by the chosen start step.
-
-If `colmap gui` fails with a `symbol lookup error` in Snap-based terminals (e.g. VS Code Snap), run:
-
-```bash
-./scripts/run_colmap_gui_clean.sh
-```
-
-## Verify Results (recommended)
-
-Use the helper script to open tools in a clean environment (avoids Snap runtime issues):
-
-```bash
-./scripts/open_results_clean.sh <project> <scene_id>
-```
-
-Example:
-
-```bash
-./scripts/open_results_clean.sh home 1
-```
-
-Expected result:
-
-1. COLMAP GUI opens with `sparse/<scene_id>/` already imported (camera poses + sparse points).
-2. MeshLab opens `dense/<scene_id>/fused.ply` (dense quality check: coverage, holes, noise).
-
-Notes:
-
-- `house_mesh.ply` is not opened by default.
-- If you want it, set `OPEN_MESH=1` before the command.
-
 ## Publish to GitHub
 
-I don’t have access to your GitHub account. To turn this into a repo under **oscar gentilhomme**:
-
-1. **Create a new repository** on GitHub (e.g. `3DRecon`), owned by your user. Do **not** add a README or .gitignore there if you already have them locally.
-
-2. **Initialize and push from this folder:**
-
-   ```bash
-   cd /path/to/3DRecon
-   git init
-   git add .
-   git commit -m "Initial commit: 3D reconstruction pipeline with COLMAP"
-   git branch -M main
-   git remote add origin https://github.com/oscargentilhomme/3DRecon.git
-   git push -u origin main
-   ```
-
-   Use your repo URL if the name or username differs. If you use SSH:
-
-   ```bash
-   git remote add origin git@github.com:oscargentilhomme/3DRecon.git
-   ```
-
-3. **Credentials:** `git push` will ask for your GitHub login (or use a [personal access token](https://github.com/settings/tokens) / SSH key).
-
-After that, the repo will be on GitHub under your account with the README, `.gitignore`, and `requirements.txt` in place.
+```bash
+git init
+git add .
+git commit -m "Initial commit: 3D reconstruction pipeline with COLMAP"
+git branch -M main
+git remote add origin <your-repo-url>
+git push -u origin main
+```

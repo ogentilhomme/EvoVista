@@ -7,7 +7,7 @@ DATA_DIR="$ROOT_DIR/data"
 
 PROJECT="${1:-}"
 SCENE="${2:-0}"
-OPEN_MESH="${OPEN_MESH:-0}" # 0: skip house_mesh, 1: open if present
+OPEN_MESH="${OPEN_MESH:-auto}" # auto: open if present, 0: never, 1: force/presence warning
 
 if [[ -z "$PROJECT" ]]; then
   echo "Usage: $0 <project> [scene_id]"
@@ -23,6 +23,7 @@ fi
 PROJECT_DIR="$DATA_DIR/$PROJECT"
 SPARSE_DIR="$PROJECT_DIR/sparse/$SCENE"
 FUSED_PLY="$PROJECT_DIR/dense/$SCENE/fused.ply"
+MESH_PLY="$PROJECT_DIR/dense/$SCENE/house_mesh.ply"
 if [[ ! -d "$PROJECT_DIR" ]]; then
   echo "Error: project directory not found: $PROJECT_DIR"
   exit 1
@@ -72,13 +73,32 @@ if [[ -f "$FUSED_PLY" ]]; then
   run_clean_bg "meshlab_fused_${PROJECT}_${SCENE}" /usr/bin/meshlab "$FUSED_PLY"
 fi
 
-if [[ "$OPEN_MESH" == "1" ]]; then
-  # Optional mesh viewer (disabled by default).
-  MESH_PLY="$PROJECT_DIR/dense/$SCENE/house_mesh.ply"
-  if [[ -f "$MESH_PLY" ]]; then
-    echo "Opening mesh in MeshLab: $MESH_PLY"
-    run_clean_bg "meshlab_mesh_${PROJECT}_${SCENE}" /usr/bin/meshlab "$MESH_PLY"
-  fi
+case "$OPEN_MESH" in
+  auto)
+    if [[ -f "$MESH_PLY" ]]; then
+      echo "Opening mesh in MeshLab: $MESH_PLY"
+      run_clean_bg "meshlab_mesh_${PROJECT}_${SCENE}" /usr/bin/meshlab "$MESH_PLY"
+    fi
+    ;;
+  1)
+    if [[ -f "$MESH_PLY" ]]; then
+      echo "Opening mesh in MeshLab: $MESH_PLY"
+      run_clean_bg "meshlab_mesh_${PROJECT}_${SCENE}" /usr/bin/meshlab "$MESH_PLY"
+    else
+      echo "Warning: OPEN_MESH=1 but mesh not found: $MESH_PLY"
+    fi
+    ;;
+  0)
+    ;;
+  *)
+    echo "Warning: invalid OPEN_MESH='$OPEN_MESH' (expected auto|0|1)."
+    ;;
+esac
+
+if [[ -f "$MESH_PLY" ]]; then
+  echo "Mesh available: $MESH_PLY"
+else
+  echo "Mesh not available yet: $MESH_PLY"
 fi
 
 echo "Done. Logs are in /tmp/colmap_gui_${PROJECT}_${SCENE}.log and /tmp/meshlab_*.log"

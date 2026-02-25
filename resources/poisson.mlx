@@ -1,0 +1,15 @@
+<!DOCTYPE FilterScript>
+<FilterScript>
+ <filter name="Surface Reconstruction: Screened Poisson">
+  <Param type="RichInt" value="8" name="depth"/>
+  <Param type="RichInt" value="5" name="fullDepth"/>
+  <Param type="RichInt" value="0" name="cgDepth"/>
+  <Param type="RichFloat" value="1.1" name="scale"/>
+  <Param type="RichFloat" value="1.5" name="samplesPerNode"/>
+  <Param type="RichFloat" value="4" name="pointWeight"/>
+  <Param type="RichInt" value="8" name="iters"/>
+  <Param type="RichBool" value="false" name="confidence"/>
+  <Param type="RichBool" value="true" name="preClean"/>
+  <Param type="RichBool" value="false" name="visibleLayer"/>
+ </filter>
+</FilterScript>

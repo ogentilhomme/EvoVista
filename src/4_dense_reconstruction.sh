@@ -10,6 +10,19 @@ type run_colmap >/dev/null 2>&1 || {
   exit 1
 }
 
+run_meshlabserver_clean() {
+  # Run apt meshlabserver with a clean environment to avoid Snap GLIBC conflicts.
+  env -i \
+    PATH="/usr/bin:/bin" \
+    HOME="${HOME:-/tmp}" \
+    USER="${USER:-}" \
+    DISPLAY="${DISPLAY:-}" \
+    XAUTHORITY="${XAUTHORITY:-}" \
+    /usr/bin/meshlabserver "$@"
+}
+
+MLX_SCRIPT="${MLX_SCRIPT:-${SCRIPT_DIR:-}/resources/poisson.mlx}"
+
 # Run dense reconstruction for each scene in sparse/ (sparse/0, sparse/1, ...).
 # Output: dense/0/, dense/1/, ... each with fused.ply (and optionally house_mesh.ply).
 
@@ -40,11 +53,17 @@ for sparse_dir in sparse/*/; do
     --output_path "$dense_dir/fused.ply"
 
   if command -v meshlabserver &>/dev/null; then
-    # Optional mesh generation. Not required when only fused point cloud is needed.
-    meshlabserver \
-      -i "$dense_dir/fused.ply" \
-      -o "$dense_dir/house_mesh.ply" \
-      -s poisson.mlx
+    # Optional mesh generation. Keep non-fatal: fused.ply is the main output.
+    if [[ -f "$MLX_SCRIPT" ]]; then
+      if ! run_meshlabserver_clean \
+        -i "$dense_dir/fused.ply" \
+        -o "$dense_dir/house_mesh.ply" \
+        -s "$MLX_SCRIPT"; then
+        echo "meshlabserver failed — skipping Poisson mesh for scene $scene_name. Fused PLY kept: $dense_dir/fused.ply"
+      fi
+    else
+      echo "meshlab script not found ($MLX_SCRIPT) — skipping Poisson mesh for scene $scene_name."
+    fi
   else
     echo "meshlabserver not found — skipping Poisson mesh for scene $scene_name. Fused PLY: $dense_dir/fused.ply"
   fi
