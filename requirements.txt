@@ -1,4 +1,4 @@
-# EvoVista pipeline — Python dependencies
+# 3DRecon pipeline — Python dependencies
 Pillow>=9.0
 opencv-python>=4.5
 numpy>=1.20

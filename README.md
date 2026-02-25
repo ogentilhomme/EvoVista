@@ -1,14 +1,6 @@
-# EvoVista
+# 3DRecon
 
-**See the evolution of your space.** EvoVista is a platform for 3D reconstruction of places using images across time. Move around the environment and add filters or overlays showing how that place looked before—especially designed for renovated spaces. A tool for house owners to visualize and share the evolution of their home.
-
-## Vision
-
-Capture a space at different moments in time, build 3D models from your photos, then explore and compare: stroll through the current layout while toggling overlays of how it looked in the past. Perfect for documenting renovations, before/after journeys, or simply preserving the memory of your home as it changes.
-
-## Pipeline
-
-The core pipeline performs 3D reconstruction from video or images: sample frames, resize, blur analysis, then [COLMAP](https://colmap.github.io/) for feature extraction, matching, sparse and dense reconstruction.
+Pipeline for 3D reconstruction from video or images: sample frames, resize, blur analysis, then [COLMAP](https://colmap.github.io/) for feature extraction, matching, sparse and dense reconstruction.
 
 ## Requirements
 
@@ -109,3 +101,61 @@ python run_gui.py
 - Choose project, start step, blur threshold, matcher (sequential/exhaustive), image set (whole/filtered).
 - **Run pipeline** opens a new terminal and runs the pipeline there (raw output for debugging).
 - Overwrite/archive dialog only considers artifacts that would be overwritten by the chosen start step.
+
+If `colmap gui` fails with a `symbol lookup error` in Snap-based terminals (e.g. VS Code Snap), run:
+
+```bash
+./scripts/run_colmap_gui_clean.sh
+```
+
+## Verify Results (recommended)
+
+Use the helper script to open tools in a clean environment (avoids Snap runtime issues):
+
+```bash
+./scripts/open_results_clean.sh <project> <scene_id>
+```
+
+Example:
+
+```bash
+./scripts/open_results_clean.sh home 1
+```
+
+Expected result:
+
+1. COLMAP GUI opens with `sparse/<scene_id>/` already imported (camera poses + sparse points).
+2. MeshLab opens `dense/<scene_id>/fused.ply` (dense quality check: coverage, holes, noise).
+
+Notes:
+
+- `house_mesh.ply` is not opened by default.
+- If you want it, set `OPEN_MESH=1` before the command.
+
+## Publish to GitHub
+
+I don’t have access to your GitHub account. To turn this into a repo under **oscar gentilhomme**:
+
+1. **Create a new repository** on GitHub (e.g. `3DRecon`), owned by your user. Do **not** add a README or .gitignore there if you already have them locally.
+
+2. **Initialize and push from this folder:**
+
+   ```bash
+   cd /path/to/3DRecon
+   git init
+   git add .
+   git commit -m "Initial commit: 3D reconstruction pipeline with COLMAP"
+   git branch -M main
+   git remote add origin https://github.com/oscargentilhomme/3DRecon.git
+   git push -u origin main
+   ```
+
+   Use your repo URL if the name or username differs. If you use SSH:
+
+   ```bash
+   git remote add origin git@github.com:oscargentilhomme/3DRecon.git
+   ```
+
+3. **Credentials:** `git push` will ask for your GitHub login (or use a [personal access token](https://github.com/settings/tokens) / SSH key).
+
+After that, the repo will be on GitHub under your account with the README, `.gitignore`, and `requirements.txt` in place.

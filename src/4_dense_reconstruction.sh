@@ -1,8 +1,17 @@
 #!/bin/bash
+
+set -euo pipefail
+# Enable bash trace only when explicitly requested from caller.
+[[ "${DEBUG_TRACE:-0}" == "1" ]] && set -x
+
+# This script is meant to be called by run.sh (which provides run_colmap backend wrapper).
+type run_colmap >/dev/null 2>&1 || {
+  echo "Error: run_colmap not found. Launch via ./run.sh"
+  exit 1
+}
+
 # Run dense reconstruction for each scene in sparse/ (sparse/0, sparse/1, ...).
 # Output: dense/0/, dense/1/, ... each with fused.ply (and optionally house_mesh.ply).
-
-set -e
 
 for sparse_dir in sparse/*/; do
   # sparse_dir is e.g. "sparse/0/" or "sparse/1/"
@@ -16,20 +25,22 @@ for sparse_dir in sparse/*/; do
   dense_dir="dense/$scene_name"
   mkdir -p "$dense_dir"
 
-  colmap image_undistorter \
+  # Undistort + PatchMatch + Fusion are the standard COLMAP dense pipeline.
+  run_colmap image_undistorter \
     --image_path images \
     --input_path "$sparse_dir" \
     --output_path "$dense_dir" \
     --output_type COLMAP
 
-  colmap patch_match_stereo \
+  run_colmap patch_match_stereo \
     --workspace_path "$dense_dir"
 
-  colmap stereo_fusion \
+  run_colmap stereo_fusion \
     --workspace_path "$dense_dir" \
     --output_path "$dense_dir/fused.ply"
 
   if command -v meshlabserver &>/dev/null; then
+    # Optional mesh generation. Not required when only fused point cloud is needed.
     meshlabserver \
       -i "$dense_dir/fused.ply" \
       -o "$dense_dir/house_mesh.ply" \

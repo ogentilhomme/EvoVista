@@ -3,6 +3,9 @@ venv/
 .venv/
 env/
 
+# Apps locales
+*.AppImage
+
 # Project data (videos, images, COLMAP outputs)
 data/*
 !data/.gitkeep

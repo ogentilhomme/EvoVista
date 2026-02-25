@@ -5,6 +5,8 @@ and run the pipeline in a new terminal window for raw output and easy debugging.
 """
 import subprocess
 import sys
+import shlex
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -24,6 +26,52 @@ ARTIFACTS_BY_FROM_STEP = {
     "sparse_reconstruction": ["dense"],
     "dense_reconstruction": ["dense"],
 }
+
+
+def _cmd_output(cmd: list[str]) -> tuple[int, str]:
+    try:
+        p = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=False,
+        )
+        return p.returncode, (p.stdout or "")
+    except Exception:
+        return 127, ""
+
+
+def docker_is_available() -> bool:
+    rc, _ = _cmd_output(["docker", "info"])
+    return rc == 0
+
+
+def local_colmap_has_cuda() -> bool:
+    # Is colmap available?
+    rc, _ = _cmd_output(["colmap", "version"])
+    if rc != 0:
+        return False
+
+    _, out = _cmd_output(["colmap", "version"])
+    lo = out.lower()
+    if "without cuda" in lo:
+        return False
+    if "with cuda" in lo or "cuda enabled" in lo:
+        return True
+    return False
+
+
+def detect_colmap_backends() -> tuple[bool, bool, str]:
+    has_local_cuda = local_colmap_has_cuda()
+    has_docker = docker_is_available()
+    if has_local_cuda and has_docker:
+        return True, True, "COLMAP local CUDA + Docker detected"
+    if has_local_cuda:
+        return True, False, "COLMAP Local only"
+    if has_docker:
+        return False, True, "COLMAP Docker only"
+    return False, False, "No COLMAP CUDA found"
 
 
 def get_projects():
@@ -101,7 +149,9 @@ def build_pipeline_args(
 ) -> list:
     """Build argv for run.sh (without 'bash')."""
     cmd = [
-        str(RUN_SH), project,
+        "bash",
+        str(RUN_SH),
+        project,
         "--from-step", from_step,
         "--matcher", matcher,
         "--use-image-set", use_image_set,
@@ -124,23 +174,15 @@ def run_pipeline_in_terminal(
     matcher: str,
     use_image_set: str,
     skip_blur_if_plot: bool,
+    colmap_backend: str,
 ) -> tuple[bool, str]:
     """Open a new terminal and run the pipeline there. Returns (success, command_string)."""
     args = build_pipeline_args(
         project, from_step, blur_threshold, matcher, use_image_set, skip_blur_if_plot
     )
-    # Shell command: cd to ROOT and run bash run.sh ...
+    # Shell command: cd to ROOT and run with selected backend.
     root_str = str(ROOT)
-    run_sh = str(RUN_SH)
-    cmd_parts = [f"bash {run_sh}", project, f"--from-step {from_step}", f"--matcher {matcher}", f"--use-image-set {use_image_set}"]
-    if blur_threshold.strip():
-        try:
-            float(blur_threshold.strip())
-            cmd_parts.append(f"--blur-threshold {blur_threshold.strip()}")
-        except ValueError:
-            pass
-    if skip_blur_if_plot:
-        cmd_parts.append("--skip-blur-if-plot")
+    cmd_parts = [f"COLMAP_BACKEND={shlex.quote(colmap_backend)}"] + [shlex.quote(p) for p in args]
     cmd_str = " ".join(cmd_parts)
     # Quote cd path if it contains spaces
     if " " in root_str:
@@ -159,26 +201,31 @@ def run_pipeline_in_terminal(
         except Exception as e:
             return False, str(e)
     elif sys.platform.startswith("linux"):
-        # Linux: try gnome-terminal, then xterm
-        try:
-            subprocess.Popen(
-                ["gnome-terminal", "--", "bash", "-c", full_cmd + "; exec bash"],
-                start_new_session=True,
-            )
-            return True, full_cmd
-        except FileNotFoundError:
+        # Linux: try common terminals and fallback if one exits immediately (e.g. symbol lookup error).
+        candidates = [
+            ["gnome-terminal", "--", "bash", "-c", full_cmd + "; exec bash"],
+            ["x-terminal-emulator", "-e", "bash", "-c", full_cmd + "; exec bash"],
+            ["xterm", "-e", full_cmd + "; exec bash"],
+        ]
+        errors = []
+        for cmd in candidates:
             try:
-                subprocess.Popen(["xterm", "-e", full_cmd + "; exec bash"], start_new_session=True)
-                return True, full_cmd
+                proc = subprocess.Popen(cmd, start_new_session=True)
+                time.sleep(0.25)
+                rc = proc.poll()
+                if rc is None:
+                    return True, full_cmd
+                errors.append(f"{cmd[0]} exited early (code {rc})")
             except FileNotFoundError:
-                return False, "No terminal found (tried gnome-terminal, xterm)"
-        except Exception as e:
-            return False, str(e)
+                errors.append(f"{cmd[0]} not found")
+            except Exception as e:
+                errors.append(f"{cmd[0]} failed: {e}")
+        return False, "Could not open terminal. " + " | ".join(errors)
     else:
         # Windows: start cmd in new window
         try:
             subprocess.Popen(
-                ["start", "cmd", "/k", f"cd /d {root_str} && bash {run_sh} {project} --from-step {from_step} --matcher {matcher} --use-image-set {use_image_set}"],
+                ["start", "cmd", "/k", full_cmd],
                 shell=True,
                 cwd=str(ROOT),
             )
@@ -221,7 +268,7 @@ def main():
 
     root = tk.Tk()
     _set_app_icon(root)
-    root.title("EvoVista pipeline")
+    root.title("3DRecon pipeline")
     root.geometry("680x520")
     root.minsize(520, 420)
 
@@ -261,36 +308,51 @@ def main():
     from_combo = ttk.Combobox(main_frame, textvariable=from_step_var, values=steps, state="readonly", width=28)
     from_combo.grid(row=2, column=1, sticky=tk.EW, pady=2, padx=(8, 0))
 
+    # COLMAP backend detection + selection
+    has_local_cuda, has_docker, backend_status_text = detect_colmap_backends()
+    ttk.Label(main_frame, text="COLMAP:").grid(row=3, column=0, sticky=tk.W, pady=2)
+    backend_status_var = tk.StringVar(value=backend_status_text)
+    ttk.Label(main_frame, textvariable=backend_status_var).grid(row=3, column=1, sticky=tk.W, pady=2, padx=(8, 0))
+
+    ttk.Label(main_frame, text="Backend:").grid(row=4, column=0, sticky=tk.W, pady=2)
+    backend_var = tk.StringVar(value="local" if has_local_cuda else "docker")
+    backend_frame = ttk.Frame(main_frame)
+    backend_frame.grid(row=4, column=1, sticky=tk.W, pady=2, padx=(8, 0))
+    rb_local = ttk.Radiobutton(backend_frame, text="Local", variable=backend_var, value="local")
+    rb_docker = ttk.Radiobutton(backend_frame, text="Docker", variable=backend_var, value="docker")
+    rb_local.pack(side=tk.LEFT)
+    rb_docker.pack(side=tk.LEFT, padx=(12, 0))
+
     # Blur threshold
-    ttk.Label(main_frame, text="Blur threshold:").grid(row=3, column=0, sticky=tk.W, pady=2)
+    ttk.Label(main_frame, text="Blur threshold:").grid(row=5, column=0, sticky=tk.W, pady=2)
     blur_var = tk.StringVar(value="")
     blur_entry = ttk.Entry(main_frame, textvariable=blur_var, width=20)
-    blur_entry.grid(row=3, column=1, sticky=tk.W, pady=2, padx=(8, 0))
-    ttk.Label(main_frame, text="(N = create filtered folder with blur ≥ N)").grid(row=3, column=2, sticky=tk.W, padx=(8, 0))
+    blur_entry.grid(row=5, column=1, sticky=tk.W, pady=2, padx=(8, 0))
+    ttk.Label(main_frame, text="(N = create filtered folder with blur ≥ N)").grid(row=5, column=2, sticky=tk.W, padx=(8, 0))
 
     # Use image set (for COLMAP)
-    ttk.Label(main_frame, text="Use image set:").grid(row=4, column=0, sticky=tk.W, pady=2)
+    ttk.Label(main_frame, text="Use image set:").grid(row=6, column=0, sticky=tk.W, pady=2)
     use_image_set_var = tk.StringVar(value="whole")
     imgset_frame = ttk.Frame(main_frame)
-    imgset_frame.grid(row=4, column=1, sticky=tk.W, pady=2, padx=(8, 0))
+    imgset_frame.grid(row=6, column=1, sticky=tk.W, pady=2, padx=(8, 0))
     ttk.Radiobutton(imgset_frame, text="Whole (images_resized)", variable=use_image_set_var, value="whole").pack(side=tk.LEFT)
     ttk.Radiobutton(imgset_frame, text="Filtered", variable=use_image_set_var, value="filtered").pack(side=tk.LEFT, padx=(12, 0))
 
     # Skip blur if plot exists
     skip_blur_var = tk.BooleanVar(value=False)
-    ttk.Checkbutton(main_frame, text="Skip blur step if plot already exists", variable=skip_blur_var).grid(row=5, column=1, sticky=tk.W, pady=2, padx=(8, 0))
+    ttk.Checkbutton(main_frame, text="Skip blur step if plot already exists", variable=skip_blur_var).grid(row=7, column=1, sticky=tk.W, pady=2, padx=(8, 0))
 
     # Matcher
-    ttk.Label(main_frame, text="Matcher:").grid(row=6, column=0, sticky=tk.W, pady=2)
+    ttk.Label(main_frame, text="Matcher:").grid(row=8, column=0, sticky=tk.W, pady=2)
     matcher_var = tk.StringVar(value="exhaustive")
     matcher_frame = ttk.Frame(main_frame)
-    matcher_frame.grid(row=6, column=1, sticky=tk.W, pady=2, padx=(8, 0))
+    matcher_frame.grid(row=8, column=1, sticky=tk.W, pady=2, padx=(8, 0))
     ttk.Radiobutton(matcher_frame, text="Exhaustive", variable=matcher_var, value="exhaustive").pack(side=tk.LEFT)
     ttk.Radiobutton(matcher_frame, text="Sequential", variable=matcher_var, value="sequential").pack(side=tk.LEFT, padx=(12, 0))
 
-    ttk.Label(main_frame, text="Output:").grid(row=7, column=0, sticky=tk.NW, pady=(8, 0))
+    ttk.Label(main_frame, text="Output:").grid(row=9, column=0, sticky=tk.NW, pady=(8, 0))
     log_area = scrolledtext.ScrolledText(main_frame, height=14, width=72, state=tk.NORMAL, wrap=tk.WORD)
-    log_area.grid(row=7, column=1, columnspan=2, sticky=tk.NSEW, pady=(4, 0), padx=(8, 0))
+    log_area.grid(row=9, column=1, columnspan=2, sticky=tk.NSEW, pady=(4, 0), padx=(8, 0))
 
     def do_run():
         p = project_var.get().strip()
@@ -299,6 +361,9 @@ def main():
             return
         if not RUN_SH.is_file():
             messagebox.showerror("Error", f"run.sh not found: {RUN_SH}")
+            return
+        if not (has_local_cuda or has_docker):
+            messagebox.showerror("Error", "No COLMAP backend available (local CUDA or Docker).")
             return
 
         proj_dir = DATA_DIR / p
@@ -331,9 +396,10 @@ def main():
         matcher = matcher_var.get()
         use_image_set = use_image_set_var.get()
         skip_blur = skip_blur_var.get()
+        colmap_backend = backend_var.get()
 
         ok, result = run_pipeline_in_terminal(
-            p, from_step, blur_threshold, matcher, use_image_set, skip_blur
+            p, from_step, blur_threshold, matcher, use_image_set, skip_blur, colmap_backend
         )
         if ok:
             log_area.delete("1.0", tk.END)
@@ -349,19 +415,45 @@ def main():
             messagebox.showerror("Could not open terminal", result)
 
     btn_frame = ttk.Frame(main_frame)
-    btn_frame.grid(row=8, column=1, sticky=tk.W, pady=(12, 4), padx=(8, 0))
+    btn_frame.grid(row=10, column=1, sticky=tk.W, pady=(12, 4), padx=(8, 0))
     run_btn = ttk.Button(btn_frame, text="Run pipeline (in new terminal)", command=do_run)
     run_btn.pack(side=tk.LEFT)
+
+    def apply_backend_availability(local_ok: bool, docker_ok: bool):
+        rb_local.state(["!disabled"] if local_ok else ["disabled"])
+        rb_docker.state(["!disabled"] if docker_ok else ["disabled"])
+
+        if local_ok and docker_ok:
+            if backend_var.get() not in ("local", "docker"):
+                backend_var.set("local")
+            run_btn.state(["!disabled"])
+        elif local_ok:
+            backend_var.set("local")
+            run_btn.state(["!disabled"])
+        elif docker_ok:
+            backend_var.set("docker")
+            run_btn.state(["!disabled"])
+        else:
+            run_btn.state(["disabled"])
+
+    def redetect_backends():
+        nonlocal has_local_cuda, has_docker
+        has_local_cuda, has_docker, status = detect_colmap_backends()
+        backend_status_var.set(status)
+        apply_backend_availability(has_local_cuda, has_docker)
+
+    ttk.Button(main_frame, text="Re-detect", command=redetect_backends).grid(row=3, column=2, padx=(8, 0))
+    apply_backend_availability(has_local_cuda, has_docker)
 
     ttk.Label(
         main_frame,
         text="Output runs in a new terminal window — raw stdout/stderr for easier debugging.",
         font=("", 8),
         foreground="gray",
-    ).grid(row=9, column=1, sticky=tk.W, pady=(0, 4), padx=(8, 0))
+    ).grid(row=11, column=1, sticky=tk.W, pady=(0, 4), padx=(8, 0))
 
     main_frame.columnconfigure(1, weight=1)
-    main_frame.rowconfigure(7, weight=1)
+    main_frame.rowconfigure(9, weight=1)
     root.columnconfigure(0, weight=1)
     root.rowconfigure(0, weight=1)
 
